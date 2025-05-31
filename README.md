@@ -32,7 +32,7 @@ pip install pillow fpdf tkinterdnd2 PyPDF2
 - 必要に応じて**↑ / ↓で順番を並び替え**
 - PDFタイトルを入力
 - 「Create PDF」をクリックし、保存先を指定
-- 「Reset」で初期化、「Merge PDFs」でPDFファイル同士の連結も可能
+- 「Reset」で初期化
 
 ---
 
