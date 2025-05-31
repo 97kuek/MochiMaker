@@ -26,7 +26,7 @@ pip install pillow fpdf tkinterdnd2 PyPDF2
 ```
 ---
 
-3. 操作手順：
+## 操作手順
 
 - PNG画像をドラッグ＆ドロップまたは「Select Image Files」で読み込み
 - 必要に応じて**↑ / ↓で順番を並び替え**
