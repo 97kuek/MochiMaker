@@ -24,23 +24,7 @@
 ```bash
 pip install pillow fpdf tkinterdnd2 PyPDF2
 ```
-
 ---
-
-## 使用方法
-
-1. このリポジトリをクローン：
-
-```bash
-git clone https://github.com/あなたのユーザー名/image-to-pdf-a4.git
-cd image-to-pdf-a4
-```
-
-2. アプリを実行：
-
-```bash
-python main.py
-```
 
 3. 操作手順：
 
