@@ -1,4 +1,5 @@
 # MochiMaker
+![Last Commit](https://img.shields.io/github/last-commit/97kuek/MochiMaker?label=最終更新&style=flat-square)
 試験の持ち込み資料作成アプリです。複数の PDF ファイルを読み込み、並べ替えて Nアップ（複数スライドを1ページに配置）レイアウトでまとめるツールです。  
 **PyQt6 + PyMuPDF** ベースで、PDF品質を保ったまま自動段組・白フチトリム・ページ番号描画などが可能です。
 
