@@ -43,6 +43,25 @@ function App() {
   const [processedCount, setProcessedCount] = useState(0);
   const [title, setTitle] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  // Print detection listeners
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      setIsPrinting(true);
+    };
+    const handleAfterPrint = () => {
+      setIsPrinting(false);
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
   // Robust sensors for both Mouse and Touch
   const sensors = useSensors(
@@ -111,7 +130,12 @@ function App() {
   };
 
   const handlePrint = () => {
-    window.print();
+    setIsPrinting(true);
+    // Small delay to allow React to re-render the clean view before printing
+    setTimeout(() => {
+      window.print();
+      // setIsPrinting(false); // Browser handles afterprint event usually, but we can double check
+    }, 100);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -183,16 +207,16 @@ function App() {
   const activePage = activeId ? pages.find(p => p.id === activeId) : null;
 
   // Render logic safely
-  const renderGridPages = () => {
+  const renderGridPages = (isForPrint: boolean) => {
     const gridPagesElements = [];
 
     for (let i = 0; i < totalGridPages; i++) {
       const startIndex = i * itemsPerPage;
       const pageItems = pages.slice(startIndex, startIndex + itemsPerPage).map((p) => {
-        return (
-          <SortableItem key={p.id} id={p.id} className="grid-item-container">
-            <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
-              <CanvasPreview canvas={p.canvas} />
+        const content = (
+          <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
+            <CanvasPreview canvas={p.canvas} />
+            {!isForPrint && (
               <button
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
@@ -224,7 +248,23 @@ function App() {
               >
                 ×
               </button>
+            )}
+          </div>
+        );
+
+        if (isForPrint) {
+          // Return plain container for print
+          return (
+            <div key={p.id} className="grid-item-container" style={{ width: '100%', height: '100%' }}>
+              {content}
             </div>
+          );
+        }
+
+        // Return Sortable container for interactive
+        return (
+          <SortableItem key={p.id} id={p.id} className="grid-item-container">
+            {content}
           </SortableItem>
         );
       });
@@ -315,56 +355,67 @@ function App() {
       />
 
       <main className="main-content">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={pages.map(p => p.id)}
-            strategy={rectSortingStrategy}
-          >
-            {loading ? (
-              <div style={{ marginTop: '5rem', textAlign: 'center' }}>
-                <div className="loader" style={{ marginBottom: '1rem', fontSize: '1.5rem', fontWeight: 600 }}>
-                  Processing PDFs...
-                </div>
-                <p>Rendered {processedCount} pages</p>
-              </div>
-            ) : pages.length === 0 ? (
-              <div style={{ marginTop: '5rem', width: '100%' }}>
-                <DropZone onFilesSelect={handleFilesSelect} />
-              </div>
-            ) : (
-              <div className="preview-area">
-                {renderGridPages()}
+        {loading ? (
+          <div style={{ marginTop: '5rem', textAlign: 'center' }}>
+            <div className="loader" style={{ marginBottom: '1rem', fontSize: '1.5rem', fontWeight: 600 }}>
+              Processing PDFs...
+            </div>
+            <p>Rendered {processedCount} pages</p>
+          </div>
+        ) : pages.length === 0 ? (
+          <div style={{ marginTop: '5rem', width: '100%' }}>
+            <DropZone onFilesSelect={handleFilesSelect} />
+          </div>
+        ) : (
+          <>
+            {/* INTERACTIVE MODE (DND Enabled) */}
+            {!isPrinting && (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={pages.map(p => p.id)}
+                  strategy={rectSortingStrategy}
+                >
+                  <div className="preview-area">
+                    {renderGridPages(false)}
 
-                {/* Only show DropZone at bottom if not printing. Handled by CSS media print mostly, but safe to keep here. */}
-                <div className="dropzone-footer" style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
-                  <DropZone onFilesSelect={handleFilesSelect} />
-                </div>
+                    <div className="dropzone-footer" style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
+                      <DropZone onFilesSelect={handleFilesSelect} />
+                    </div>
+                  </div>
+                </SortableContext>
+
+                <DragOverlay adjustScale={true}>
+                  {activePage ? (
+                    <div className="grid-item" style={{
+                      width: '150px', // Smaller drag preview
+                      height: 'auto',
+                      background: 'white',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                      border: '2px solid #2563eb',
+                      borderRadius: '0.5rem',
+                      overflow: 'hidden',
+                      opacity: 0.9
+                    }}>
+                      <CanvasPreview canvas={activePage.canvas} />
+                    </div>
+                  ) : null}
+                </DragOverlay>
+              </DndContext>
+            )}
+
+            {/* PRINT MODE (Static Layout, No Interactivity) */}
+            {isPrinting && (
+              <div className="print-area">
+                {renderGridPages(true)}
               </div>
             )}
-          </SortableContext>
-
-          <DragOverlay adjustScale={true}>
-            {activePage ? (
-              <div className="grid-item" style={{
-                width: '150px', // Smaller drag preview
-                height: 'auto',
-                background: 'white',
-                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                border: '2px solid #2563eb',
-                borderRadius: '0.5rem',
-                overflow: 'hidden',
-                opacity: 0.9
-              }}>
-                <CanvasPreview canvas={activePage.canvas} />
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+          </>
+        )}
       </main>
     </div>
   );
