@@ -13,6 +13,8 @@ interface ControlsProps {
     onPrint: () => void;
     fileCount: number;
     onClearAll: () => void;
+    title: string;
+    setTitle: (title: string) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -26,7 +28,9 @@ export const Controls: React.FC<ControlsProps> = ({
     setOrientation,
     onPrint,
     fileCount,
-    onClearAll
+    onClearAll,
+    title,
+    setTitle
 }) => {
     const presets = [
         { label: '1x1', rows: 1, cols: 1 },
@@ -44,9 +48,22 @@ export const Controls: React.FC<ControlsProps> = ({
                     MochiMaker
                 </div>
                 <div style={{ color: '#9ca3af', fontSize: '1.25rem' }}>/</div>
-                <div style={{ fontWeight: 500 }}>
-                    {fileCount > 0 ? `${fileCount} file(s)` : 'No files'}
-                </div>
+                {/* Title Input */}
+                <input
+                    type="text"
+                    placeholder="Document Title (Header)"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    style={{
+                        border: 'none',
+                        borderBottom: '1px solid #ccc',
+                        outline: 'none',
+                        fontSize: '1rem',
+                        padding: '0.25rem',
+                        minWidth: '200px',
+                        fontWeight: 500
+                    }}
+                />
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', flex: 1 }}>

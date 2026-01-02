@@ -1,8 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DropZone } from './components/DropZone';
 import { Controls } from './components/Controls';
-
+import { SortableItem } from './components/SortableItem';
 import { loadPDF, renderPageToCanvas, type PDFPageData } from './utils/pdfProcessor';
+
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  type DragStartEvent,
+  type DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+} from '@dnd-kit/sortable';
 
 // Helper to render provided canvas element into a div
 const CanvasPreview: React.FC<{ canvas: HTMLCanvasElement }> = ({ canvas }) => {
@@ -11,10 +29,6 @@ const CanvasPreview: React.FC<{ canvas: HTMLCanvasElement }> = ({ canvas }) => {
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.innerHTML = '';
-      // Clone canvas or use image data to avoid "node already used" issues if we re-render?
-      // Actually, since we only show each page once, we can append the original canvas.
-      // But if we change layout, we might re-mount.
-      // Appending the same canvas instance is fine as long as we don't try to append it to two places.
       canvas.style.width = '100%';
       canvas.style.height = '100%';
       canvas.style.objectFit = 'contain';
@@ -42,14 +56,23 @@ function App() {
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [loading, setLoading] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
+  const [title, setTitle] = useState('');
+  const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Appending logic: add to existing files/pages instead of replacing
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   const handleFilesSelect = async (selectedFiles: File[]) => {
-    // Append files
     setFiles(prev => [...prev, ...selectedFiles]);
     setLoading(true);
-    // Don't reset processed count, just add to it contextually or reset for this batch
-    // Actually, let's just show "Processing..." and the increment
 
     const newPages: PDFPageData[] = [];
 
@@ -60,7 +83,7 @@ function App() {
 
         for (let i = 1; i <= totalPages; i++) {
           const pageData = await renderPageToCanvas(pdf, i, 2.0);
-          newPages.push(pageData);
+          newPages.push({ ...pageData, id: `${file.name}-${i}-${crypto.randomUUID()}` });
           setProcessedCount(prev => prev + 1);
         }
       }
@@ -79,18 +102,36 @@ function App() {
       setFiles([]);
       setPages([]);
       setProcessedCount(0);
+      setTitle('');
     }
   };
 
-  const handleDeletePage = (indexToDelete: number) => {
-    setPages(prev => prev.filter((_, idx) => idx !== indexToDelete));
+  const handleDeletePage = (idToDelete: string) => {
+    setPages(prev => prev.filter(p => p.id !== idToDelete));
   };
 
   const handlePrint = () => {
     window.print();
   };
 
-  // Calculate dynamic paper dimensions
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setPages((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+
+    setActiveId(null);
+  };
+
   const getPaperStyle = () => {
     const size = PAPER_SIZES[paperSize];
     if (orientation === 'landscape') {
@@ -101,7 +142,6 @@ function App() {
 
   const paperStyle = getPaperStyle();
 
-  // Inject print styles dynamically
   useEffect(() => {
     const styleId = 'dynamic-print-style';
     let styleEl = document.getElementById(styleId) as HTMLStyleElement;
@@ -129,7 +169,6 @@ function App() {
     `;
   }, [paperSize, orientation]);
 
-  // Pagination Logic
   const itemsPerPage = layout.rows * layout.cols;
   const totalGridPages = pages.length > 0 ? Math.ceil(pages.length / itemsPerPage) : 0;
 
@@ -137,61 +176,87 @@ function App() {
   if (pages.length > 0) {
     for (let i = 0; i < totalGridPages; i++) {
       const startIndex = i * itemsPerPage;
-      const pageItems = pages.slice(startIndex, startIndex + itemsPerPage).map((p, idx) => {
-        const actualIndex = startIndex + idx;
+      const pageItems = pages.slice(startIndex, startIndex + itemsPerPage).map((p) => {
         return (
-          <div key={`${i}-${idx}`} style={{ position: 'relative', width: '100%', height: '100%' }} className="grid-item-container">
-            <CanvasPreview canvas={p.canvas} />
-            <button
-              onClick={() => handleDeletePage(actualIndex)}
-              className="delete-overlay"
-              style={{
-                position: 'absolute',
-                top: '5px',
-                right: '5px',
-                background: 'rgba(239, 68, 68, 0.9)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '50%',
-                width: '24px',
-                height: '24px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                zIndex: 10
-              }}
-              title="Remove Slide"
-            >
-              ×
-            </button>
-          </div>
+          <SortableItem key={p.id} id={p.id} className="grid-item-container">
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              <CanvasPreview canvas={p.canvas} />
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeletePage(p.id);
+                }}
+                className="delete-overlay"
+                style={{
+                  position: 'absolute',
+                  top: '5px',
+                  right: '5px',
+                  background: 'rgba(239, 68, 68, 0.9)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '24px',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  zIndex: 10
+                }}
+                title="Remove Slide"
+              >
+                ×
+              </button>
+            </div>
+          </SortableItem>
         );
       });
 
       gridPages.push(
         <div
           key={i}
-          className="a4-page" // We keep class name for CSS but override style
+          className="a4-page"
           style={{
             width: paperStyle.width,
             minHeight: paperStyle.height,
-            display: 'grid',
-            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-            gap: `${gap}px`,
-            // Force rows to be equal height if we want 2025 modern look
-            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-            // We need to constrain height to the page minus padding
-            height: paperStyle.height // specific height for grid calculation
+            height: paperStyle.height,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '10mm',
+            boxSizing: 'border-box',
+            backgroundColor: 'white'
           }}
         >
-          {pageItems.map((item, idx) => (
-            <div key={idx} className="grid-item" style={{ position: 'relative' }}>
-              {item}
+          {title && (
+            <div style={{
+              marginBottom: '5mm',
+              textAlign: 'center',
+              fontWeight: 'bold',
+              fontSize: '18px',
+              borderBottom: '2px solid #333',
+              paddingBottom: '2mm'
+            }}>
+              {title}
             </div>
-          ))}
+          )}
 
-          {/* Page Number */}
+          <div style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
+            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
+            gap: `${gap}px`,
+            width: '100%',
+            height: '100%'
+          }}>
+            {pageItems.map((item, idx) => (
+              <div key={idx} className="grid-item" style={{ position: 'relative', overflow: 'hidden' }}>
+                {item}
+              </div>
+            ))}
+          </div>
+
           <div style={{
             position: 'absolute',
             bottom: '5mm',
@@ -207,6 +272,8 @@ function App() {
     }
   }
 
+  const activePage = activeId ? pages.find(p => p.id === activeId) : null;
+
   return (
     <div className="app-container">
       <Controls
@@ -221,36 +288,56 @@ function App() {
         onPrint={handlePrint}
         fileCount={files.length}
         onClearAll={handleClearAll}
+        title={title}
+        setTitle={setTitle}
       />
 
       <main className="main-content">
-        {loading ? (
-          <div style={{ marginTop: '5rem', textAlign: 'center' }}>
-            <div className="loader" style={{ marginBottom: '1rem', fontSize: '1.5rem', fontWeight: 600 }}>
-              Processing PDFs...
-            </div>
-            <p>Rendered {processedCount} pages</p>
-          </div>
-        ) : pages.length === 0 ? (
-          <div style={{ marginTop: '5rem', width: '100%' }}>
-            <DropZone onFilesSelect={handleFilesSelect} />
-          </div>
-        ) : (
-          <div className="preview-area">
-            {/* Show dropzone at bottom for appending? Or maybe a small button?
-                 Actually, just keeping dropzone visible if empty is fine, but for append mode,
-                 we might want a "Add more" button or area.
-                 For now, let's keep it simple: if pages exist, maybe show a small drop area or
-                 rely on a button in Controls? Actually, user spec said DropZone adds.
-                 Let's add a small DropZone at the bottom of the list or a floating one.
-             */}
-            {gridPages}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={pages.map(p => p.id)}
+            strategy={rectSortingStrategy}
+          >
+            {loading ? (
+              <div style={{ marginTop: '5rem', textAlign: 'center' }}>
+                <div className="loader" style={{ marginBottom: '1rem', fontSize: '1.5rem', fontWeight: 600 }}>
+                  Processing PDFs...
+                </div>
+                <p>Rendered {processedCount} pages</p>
+              </div>
+            ) : pages.length === 0 ? (
+              <div style={{ marginTop: '5rem', width: '100%' }}>
+                <DropZone onFilesSelect={handleFilesSelect} />
+              </div>
+            ) : (
+              <div className="preview-area">
+                {gridPages}
+                <div style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
+                  <DropZone onFilesSelect={handleFilesSelect} />
+                </div>
+              </div>
+            )}
+          </SortableContext>
 
-            <div style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
-              <DropZone onFilesSelect={handleFilesSelect} />
-            </div>
-          </div>
-        )}
+          <DragOverlay>
+            {activePage ? (
+              <div className="grid-item" style={{
+                width: '200px',
+                height: 'auto',
+                background: 'white',
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                border: '1px solid #ccc'
+              }}>
+                <CanvasPreview canvas={activePage.canvas} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </main>
     </div>
   );

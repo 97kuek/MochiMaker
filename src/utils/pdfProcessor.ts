@@ -1,10 +1,11 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Set up the worker source. 
-// Use local public file for offline support.
-pdfjsLib.GlobalWorkerOptions.workerSrc = `pdf.worker.min.mjs`;
+// Use local public file for offline support, ensuring correct path with base URL.
+pdfjsLib.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
 
 export interface PDFPageData {
+    id: string;
     pageNumber: number;
     canvas: HTMLCanvasElement;
     width: number;
@@ -43,6 +44,7 @@ export const renderPageToCanvas = async (
     await page.render(renderContext).promise;
 
     return {
+        id: crypto.randomUUID(),
         pageNumber,
         canvas,
         width: viewport.width,
