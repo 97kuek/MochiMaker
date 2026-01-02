@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { DropZone } from './components/DropZone';
 import { Controls } from './components/Controls';
 import { SortableItem } from './components/SortableItem';
+import { CanvasPreview } from './components/CanvasPreview';
 import { loadPDF, renderPageToCanvas, type PDFPageData } from './utils/pdfProcessor';
 
 import {
   DndContext,
   closestCenter,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -21,23 +23,6 @@ import {
   sortableKeyboardCoordinates,
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
-
-// Helper to render provided canvas element into a div
-const CanvasPreview: React.FC<{ canvas: HTMLCanvasElement }> = ({ canvas }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.innerHTML = '';
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
-      canvas.style.objectFit = 'contain';
-      containerRef.current.appendChild(canvas);
-    }
-  }, [canvas]);
-
-  return <div ref={containerRef} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />;
-};
 
 const PAPER_SIZES: Record<string, { width: string; height: string }> = {
   a4: { width: '210mm', height: '297mm' },
@@ -59,10 +44,17 @@ function App() {
   const [title, setTitle] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
 
+  // Robust sensors for both Mouse and Touch
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
-        distance: 8,
+        distance: 10, // Avoid accidental drags on click
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Hold to drag
+        tolerance: 5, // Allow slight movement during hold
       },
     }),
     useSensor(KeyboardSensor, {
@@ -71,6 +63,8 @@ function App() {
   );
 
   const handleFilesSelect = async (selectedFiles: File[]) => {
+    // Append unique files based on name/size/timestamp if possible, but File equality is tricky.
+    // For now, simple append.
     setFiles(prev => [...prev, ...selectedFiles]);
     setLoading(true);
 
@@ -78,20 +72,26 @@ function App() {
 
     try {
       for (const file of selectedFiles) {
-        const pdf = await loadPDF(file);
-        const totalPages = pdf.numPages;
+        // Wrap in try-catch per file to avoid total failure
+        try {
+          const pdf = await loadPDF(file);
+          const totalPages = pdf.numPages;
 
-        for (let i = 1; i <= totalPages; i++) {
-          const pageData = await renderPageToCanvas(pdf, i, 2.0);
-          newPages.push({ ...pageData, id: `${file.name}-${i}-${crypto.randomUUID()}` });
-          setProcessedCount(prev => prev + 1);
+          for (let i = 1; i <= totalPages; i++) {
+            const pageData = await renderPageToCanvas(pdf, i, 2.0); // Render at 2x scale for quality
+            newPages.push({ ...pageData, id: `${file.name}-${i}-${crypto.randomUUID()}` });
+            setProcessedCount(prev => prev + 1);
+          }
+        } catch (fileErr) {
+          console.error(`Failed to load file ${file.name}:`, fileErr);
+          alert(`Error loading ${file.name}. It might be corrupted or password protected.`);
         }
       }
 
       setPages(prev => [...prev, ...newPages]);
     } catch (error) {
-      console.error('Error processing PDF:', error);
-      alert('Failed to load PDF. See console for details.');
+      console.error('Critical error processing PDFs:', error);
+      alert('An unexpected error occurred. Please reload and try again.');
     } finally {
       setLoading(false);
     }
@@ -142,6 +142,7 @@ function App() {
 
   const paperStyle = getPaperStyle();
 
+  // Inject dynamic print styles
   useEffect(() => {
     const styleId = 'dynamic-print-style';
     let styleEl = document.getElementById(styleId) as HTMLStyleElement;
@@ -155,15 +156,22 @@ function App() {
       ? `${PAPER_SIZES[paperSize].height} ${PAPER_SIZES[paperSize].width}`
       : `${PAPER_SIZES[paperSize].width} ${PAPER_SIZES[paperSize].height}`;
 
+    // We strictly force the size and remove browser margins.
     styleEl.innerHTML = `
       @media print {
         @page {
           size: ${sizeCSS};
           margin: 0;
         }
+        /* Extra safety: override any bootstrap/browser styles */
+        body { margin: 0; padding: 0; }
+        
+        /* STRICTLY FORCE DIMENSIONS */
         .a4-page {
-          width: ${sizeCSS.split(' ')[0]} !important;
-          min-height: ${sizeCSS.split(' ')[1]} !important;
+           width: ${sizeCSS.split(' ')[0]} !important;
+           height: ${sizeCSS.split(' ')[1]} !important;
+           min-height: ${sizeCSS.split(' ')[1]} !important;
+           max-height: ${sizeCSS.split(' ')[1]} !important;
         }
       }
     `;
@@ -172,14 +180,18 @@ function App() {
   const itemsPerPage = layout.rows * layout.cols;
   const totalGridPages = pages.length > 0 ? Math.ceil(pages.length / itemsPerPage) : 0;
 
-  const gridPages = [];
-  if (pages.length > 0) {
+  const activePage = activeId ? pages.find(p => p.id === activeId) : null;
+
+  // Render logic safely
+  const renderGridPages = () => {
+    const gridPagesElements = [];
+
     for (let i = 0; i < totalGridPages; i++) {
       const startIndex = i * itemsPerPage;
       const pageItems = pages.slice(startIndex, startIndex + itemsPerPage).map((p) => {
         return (
           <SortableItem key={p.id} id={p.id} className="grid-item-container">
-            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+            <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
               <CanvasPreview canvas={p.canvas} />
               <button
                 onPointerDown={(e) => e.stopPropagation()}
@@ -188,6 +200,7 @@ function App() {
                   handleDeletePage(p.id);
                 }}
                 className="delete-overlay"
+                type="button" // Important preventing form submission if any
                 style={{
                   position: 'absolute',
                   top: '5px',
@@ -202,9 +215,12 @@ function App() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: 'pointer',
-                  zIndex: 10
+                  zIndex: 10,
+                  fontSize: '16px',
+                  lineHeight: 1
                 }}
                 title="Remove Slide"
+                aria-label="Remove Slide"
               >
                 ×
               </button>
@@ -213,19 +229,20 @@ function App() {
         );
       });
 
-      gridPages.push(
+      gridPagesElements.push(
         <div
           key={i}
           className="a4-page"
           style={{
             width: paperStyle.width,
             minHeight: paperStyle.height,
-            height: paperStyle.height,
+            height: paperStyle.height, // Strict height for flex distribution
             display: 'flex',
             flexDirection: 'column',
             padding: '10mm',
             boxSizing: 'border-box',
-            backgroundColor: 'white'
+            backgroundColor: 'white',
+            position: 'relative'
           }}
         >
           {title && (
@@ -235,7 +252,8 @@ function App() {
               fontWeight: 'bold',
               fontSize: '18px',
               borderBottom: '2px solid #333',
-              paddingBottom: '2mm'
+              paddingBottom: '2mm',
+              flexShrink: 0 // Prevent shrinking
             }}>
               {title}
             </div>
@@ -244,14 +262,19 @@ function App() {
           <div style={{
             flex: 1,
             display: 'grid',
-            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
+            gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`, // minmax(0,1fr) prevents overflow
+            gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
             gap: `${gap}px`,
             width: '100%',
-            height: '100%'
+            overflow: 'hidden' // strict container
           }}>
             {pageItems.map((item, idx) => (
-              <div key={idx} className="grid-item" style={{ position: 'relative', overflow: 'hidden' }}>
+              <div key={idx} className="grid-item" style={{
+                position: 'relative',
+                width: '100%',
+                height: '100%',
+                overflow: 'hidden'
+              }}>
                 {item}
               </div>
             ))}
@@ -259,10 +282,10 @@ function App() {
 
           <div style={{
             position: 'absolute',
-            bottom: '5mm',
+            bottom: '5mm', // Use exact positioning relative to page edge
             right: '10mm',
             fontSize: '10px',
-            color: '#ccc',
+            color: '#999',
             pointerEvents: 'none'
           }}>
             Page {i + 1}
@@ -270,9 +293,8 @@ function App() {
         </div>
       );
     }
-  }
-
-  const activePage = activeId ? pages.find(p => p.id === activeId) : null;
+    return gridPagesElements;
+  };
 
   return (
     <div className="app-container">
@@ -316,22 +338,27 @@ function App() {
               </div>
             ) : (
               <div className="preview-area">
-                {gridPages}
-                <div style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
+                {renderGridPages()}
+
+                {/* Only show DropZone at bottom if not printing. Handled by CSS media print mostly, but safe to keep here. */}
+                <div className="dropzone-footer" style={{ margin: '2rem 0', maxWidth: '600px', width: '100%' }}>
                   <DropZone onFilesSelect={handleFilesSelect} />
                 </div>
               </div>
             )}
           </SortableContext>
 
-          <DragOverlay>
+          <DragOverlay adjustScale={true}>
             {activePage ? (
               <div className="grid-item" style={{
-                width: '200px',
+                width: '150px', // Smaller drag preview
                 height: 'auto',
                 background: 'white',
-                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-                border: '1px solid #ccc'
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                border: '2px solid #2563eb',
+                borderRadius: '0.5rem',
+                overflow: 'hidden',
+                opacity: 0.9
               }}>
                 <CanvasPreview canvas={activePage.canvas} />
               </div>

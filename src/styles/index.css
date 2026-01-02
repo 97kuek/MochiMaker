@@ -120,40 +120,6 @@ button {
   object-fit: contain;
 }
 
-/* Print Styles */
-@media print {
-  @page {
-    size: A4;
-    margin: 0;
-  }
-
-  body {
-    background: none;
-  }
-
-  .controls-header {
-    display: none;
-  }
-
-  .main-content {
-    padding: 0;
-    overflow: visible;
-  }
-
-  .a4-page {
-    box-shadow: none;
-    margin: 0;
-    page-break-after: always;
-    min-height: 297mm;
-  }
-
-  /* Hide UI elements on print */
-  .delete-overlay,
-  .grid-item-container button {
-    display: none !important;
-  }
-}
-
 /* Mobile Optimizations */
 @media screen and (max-width: 768px) {
   .controls-header {
@@ -166,10 +132,88 @@ button {
     display: none;
   }
 
+  /* Scale preview container instead of individual pages to avoid layout issues */
+  .preview-area {
+    width: 100%;
+    overflow-x: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
   .a4-page {
-    transform: scale(0.5);
+    /* Use zoom or transform with strict container for mobile */
+    transform: scale(0.6);
     transform-origin: top center;
-    margin-bottom: -140mm;
-    /* Compensate for big gap caused by scaling */
+    margin-bottom: -100mm;
+    /* Compensate for empty space after scaling */
+  }
+
+  /* Reset dropzone width on mobile */
+  .dropzone {
+    max-width: 90%;
+  }
+}
+
+/* Print Styles - CRITICAL */
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  body {
+    background: white;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .app-container,
+  .main-content,
+  .preview-area {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 0;
+    margin: 0;
+  }
+
+  .controls-header,
+  .dropzone,
+  .loader {
+    display: none !important;
+  }
+
+  .a4-page {
+    margin: 0 !important;
+    box-shadow: none !important;
+    /* Ensure one page per sheet */
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+    overflow: hidden !important;
+    /* Clip content strictly */
+    /* Dimensions are handled by inline styles injected by JS to match paper size */
+  }
+
+  /* Remove the last page break if possible, but difficult in pure CSS. 
+     User usually handles extra blank pages in printer dialog. */
+
+  .delete-overlay,
+  .grid-item-container button {
+    display: none !important;
+  }
+
+  /* Ensure grids print correctly */
+  .grid-item,
+  .grid-item-container {
+    border: none !important;
+    transform: none !important;
+    /* CRITICAL: Remove dnd-kit transforms */
+    transition: none !important;
+    position: relative !important;
+    /* Ensure content flows naturally */
+    left: auto !important;
+    top: auto !important;
+    box-shadow: none !important;
   }
 }

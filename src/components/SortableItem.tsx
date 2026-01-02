@@ -24,7 +24,7 @@ export const SortableItem: React.FC<SortableItemProps> = ({ id, className, child
         opacity: isDragging ? 0.5 : 1,
         height: '100%',
         width: '100%',
-        touchAction: 'none' // Important for mobile D&D
+        touchAction: 'manipulation' // Allow scrolling/zooming until drag activation
     };
 
     return (
